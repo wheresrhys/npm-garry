@@ -1,0 +1,7 @@
+require('babel-core/register')({
+	plugins:[
+		'transform-es2015-modules-commonjs',
+		'transform-async-to-generator'
+	]
+});
+require('./app');
