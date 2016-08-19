@@ -9,7 +9,7 @@ function getDb () {
 		return new Promise((resolve, reject) => {
 			cypher.call(db, opts, (err, results) => {
 				if (err) {
-					logger.warn({ event: 'DB_ERROR', error: err.toString() });
+					console.warn({ event: 'DB_ERROR', error: err.toString() });
 					reject(err);
 					return;
 				}
@@ -75,7 +75,11 @@ const Version = new Model({
 
 	schema: {
 		name: {
-			type: String,
+			semver: String,
+			required: true
+		},
+		name: {
+			numericSemver: Number,
 			required: true
 		}
 	},
@@ -135,7 +139,7 @@ function createConstraint(label) {
 	return new Promise((resolve, reject) => {
 		console.log('promising to return for ', label);
 		const query = `CREATE CONSTRAINT ON (actor:${label}) ASSERT actor.uuid IS UNIQUE`;
-		db.cypher({query}).then(resp => {
+		getDb().cypher({query}).then(resp => {
 			console.log('created constraint for ', label);
 			resolve(resp);
 		}).catch(err => {
@@ -153,7 +157,7 @@ function createConstraint(label) {
 
 function init() {
 	return directly(1, Object.keys(models).map(m => () => createConstraint(models[m].type)))
-		.then(() => console.log("All done creating constraints!"));
+		.then(() => console.log("All done creating constraints!"))
 }
 
 module.exports = Object.assign({ init , getDb}, models);
