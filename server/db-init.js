@@ -24,6 +24,7 @@ function getDb () {
 class Model {
 	constructor(opts) {
 		this.type = opts.type;
+		this.indexOn = opts.indexOn,
 		this.relationships = opts.relationships || [];
 		this.schema = opts.schema || {};
 		this.setConstraints();
@@ -54,7 +55,7 @@ class Model {
 
 const Package = new Model({
 	type: 'Package',
-
+	indexOn: 'name',
 	schema: {
 		name: {
 			type: String,
@@ -72,14 +73,18 @@ const Package = new Model({
 
 const Version = new Model({
 	type: 'Version',
-
+	indexOn: 'nameVersion',
 	schema: {
-		name: {
-			semver: String,
+		nameVersion: {
+			type: String,
 			required: true
 		},
-		name: {
-			numericSemver: Number,
+		semver: {
+			type: String,
+			required: true
+		},
+		numericSemver: {
+			type: Number,
 			required: true
 		}
 	},
@@ -135,10 +140,11 @@ const models = {
 
 let retryCount = 0;
 
-function createConstraint(label) {
+function createConstraint(label, indexOn) {
 	return new Promise((resolve, reject) => {
 		console.log('promising to return for ', label);
-		const query = `CREATE CONSTRAINT ON (actor:${label}) ASSERT actor.uuid IS UNIQUE`;
+		const query = `CREATE CONSTRAINT ON (actor:${label}) ASSERT actor.${indexOn} IS UNIQUE`;
+		console.log(query);
 		getDb().cypher({query}).then(resp => {
 			console.log('created constraint for ', label);
 			resolve(resp);
@@ -146,7 +152,7 @@ function createConstraint(label) {
 			console.log('error creating constraint for ', label);
 			if(retryCount++ < 5) {
 				console.log('retrying...');
-				createConstraint(label);
+				createConstraint(label, indexOn);
 			} else {
 				console.log('rejecting');
 				reject(err);
@@ -156,7 +162,7 @@ function createConstraint(label) {
 }
 
 function init() {
-	return directly(1, Object.keys(models).map(m => () => createConstraint(models[m].type)))
+	return directly(1, Object.keys(models).filter(m => models[m].indexOn).map(m => () => createConstraint(models[m].type, models[m].indexOn)))
 		.then(() => console.log("All done creating constraints!"))
 }
 

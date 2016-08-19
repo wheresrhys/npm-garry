@@ -49,25 +49,40 @@ function getDepObject (name, range) {
 
 }
 
-function createTree(npm) {
-return db.cypher({
+async function createTree(name, semverRange, npm) {
+    npm = npm || await fetch(`https://registry.npmjs.org/${name}/${semverRange || 'latest'}?json=true`).then(res => res.json());
+    const deps = npm.dependencies || {};
+    return Promise.all(
+        [createShallowTree(npm)]
+            .concat(
+                Object.keys(deps).map(name => createTree(name, [deps[name]]))
+            )
+    )
+}
+
+function createShallowTree(npm) {
+
+    return db.cypher({
         query: `\
-MERGE (p:Package {name: {name}})-[h:hasVersion]->(v:Version {semver: {semver}, numericSemver: {numericSemver}})
+MERGE (p:Package {name: {name}})
+MERGE (v:Version {semver: {semver}, numericSemver: {numericSemver}, nameVersion: {nameVersion}})
+MERGE (p)-[h:hasVersion]->(v)
 WITH p, v, { dependencies } AS deps
 UNWIND deps AS dep
-MERGE (v)-[d:dependsOn]->(p2:Package {name: dep.package })
-SET d = dep
+MERGE (p2:Package {name: dep.package })
+MERGE (v)-[d:dependsOn]->(p2)
+ON CREATE SET d += dep
 RETURN p, v
 `
 ,
         params: {
             name: npm.name,
             semver: npm.version,
+            nameVersion: `${npm.name}.${npm.version}`,
             numericSemver: semverToNumber(npm.version),
-            dependencies: Object.keys(npm.dependencies).map(name => getDepObject(name, npm.dependencies[name]))
+            dependencies: Object.keys(npm.dependencies || {}).map(name => getDepObject(name, npm.dependencies[name]))
         },
     })
-.catch (err => console.log(err))
 }
 
 const apiRouter = koaRouter();
@@ -82,7 +97,7 @@ apiRouter.get('/package/:name', async (ctx, next) => {
     })
 
     if (!neo[0] || notLatest(neo, npm.version)) {
-        ctx.body = await createTree(npm);
+        ctx.body = await createTree(ctx.params.name, npm.version, npm);
     }
 
 
