@@ -26,6 +26,7 @@ function semverToNumber(semver) {
 function getDepObject (name, range) {
     const obj = {package: name, range};
     const normalizedRange = semver.validRange(range);
+    console.log(normalizedRange);
     if (/\|\|/.test(range)) {
         throw 'Disjointed semver ranges not supported yet';
     }
@@ -38,30 +39,64 @@ function getDepObject (name, range) {
         })
     } else {
         const rx = /\d+\.\d+\.\d+/g;
-        return Object.assign(obj, {
-            min: semverToNumber(rx.exec(normalizedRange)[0]),
-            max: semverToNumber(rx.exec(normalizedRange)[0]),
-            hardMax: normalizedRange.indexOf('<=') > -1,
-            hardMin: normalizedRange.indexOf('>=') > -1
-        })
+        const firstSemver = (rx.exec(normalizedRange) || [])[0];
+        const secondSemver = (rx.exec(normalizedRange) || [])[0];
+        if (firstSemver && secondSemver) {
+            return Object.assign(obj, {
+                min: firstSemver,
+                max: secondSemver,
+                hardMax: normalizedRange.indexOf('<=') > -1,
+                hardMin: normalizedRange.indexOf('>=') > -1
+            })
+        } else {
+            if (normalizedRange.indexOf('<') > -1) {
+                return Object.assign(obj, {
+                    max: secondSemver,
+                    hardMax: normalizedRange.indexOf('<=') > -1
+                })
+            } else {
+                return Object.assign(obj, {
+                    min: firstSemver,
+                    hardMin: normalizedRange.indexOf('>=') > -1
+                })
+            }
+        }
     }
 
 
 }
 
 async function createTree(name, semverRange, npm) {
+
     npm = npm || await fetch(`https://registry.npmjs.org/${name}/${semverRange || 'latest'}?json=true`).then(res => res.json());
-    const deps = npm.dependencies || {};
-    return Promise.all(
-        [createShallowTree(npm)]
-            .concat(
-                Object.keys(deps).map(name => createTree(name, [deps[name]]))
-            )
-    )
+    let newData;
+    if (npm.dependencies) {
+        newData = Promise.all([createShallowTree(npm)]
+            .concat(Object.keys(npm.dependencies).map(name => createTree(name, [npm.dependencies[name]]))));
+    } else {
+        newData = Promise.resolve([createShallowTree(npm)]);
+    }
+    return Promise.race([
+        readTree(name, npm.version),
+        newData
+    ])
+}
+
+function readTree(name, version) {
+    return db.cypher({
+        query: `\
+MATCH path=(p:Package {name: {name}})-[h:hasVersion]->(Version {semver: {semver}})-[*0..]->(node)
+RETURN node, length(path) AS depth
+`,
+        params: {
+            name: name,
+            semver: version
+        },
+    }).then(json => JSON.stringify(json, null, 2))
 }
 
 function createShallowTree(npm) {
-
+    // TODO write updated date
     return db.cypher({
         query: `\
 MERGE (p:Package {name: {name}})
@@ -72,9 +107,8 @@ UNWIND deps AS dep
 MERGE (p2:Package {name: dep.package })
 MERGE (v)-[d:dependsOn]->(p2)
 ON CREATE SET d += dep
-RETURN p, v
-`
-,
+RETURN p as package, v as version, d as dependency
+`,
         params: {
             name: npm.name,
             semver: npm.version,
@@ -89,6 +123,9 @@ const apiRouter = koaRouter();
 
 apiRouter.get('/package/:name', async (ctx, next) => {
     const npm = await fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json());
+    if (npm.error) {
+        throw 'not a valid package name'
+    }
     const neo = await db.cypher({
         query: `MATCH (p:Package {name: {name}})-[hasVersion]->(v) RETURN p, v`,
         params: {
@@ -98,52 +135,13 @@ apiRouter.get('/package/:name', async (ctx, next) => {
 
     if (!neo[0] || notLatest(neo, npm.version)) {
         ctx.body = await createTree(ctx.params.name, npm.version, npm);
+    } else {
+        // TODO if date created not recent refresh in background
+        ctx.body = await readTree(ctx.params.name, npm.version);
     }
 
 
-//     // RETURN person.Name, friend.Name
-//
-    // get latest version from npm   \___ race
-    // get latest version from neo4j /
-    // if same return neo4j
-    // else send message saying getting latest version
-    // create node for latest version
-    // compare deps with previous version
-    //
 
-    // const dbResult = await db.cypher({
-    //     query: 'MATCH (p:Package {name: {name}}) RETURN p',
-    //     params: {
-    //         name: ctx.params.name,
-    //     },
-    // }).then(results => {
-    //     var result = results[0];
-    //     if (!result) {
-    //         return db.cypher({
-    //             query: 'CREATE (p:Package {name: {name}}) RETURN p',
-    //             params: {
-    //                 name: ctx.params.name,
-    //             },
-    //         })
-    //     }
-    //     return results;
-    // })
-    //     .then(results => {
-    //         const result = results[0]
-    //         if(!result) {
-    //             throw 'No results still!';
-    //         }
-    //         var pack = result['p'];
-    //         console.log(JSON.stringify(pack, null, 4));
-    //     });
-  // // `this` is the regular koa context created from the `ws` onConnection `socket.upgradeReq` object.
-  // // the websocket is added to the context on `this.websocket`.
-  // ctx.websocket.send('Hello World');
-  // ctx.websocket.on('message', function(message) {
-  //   // do something with the message from client
-  //   console.log(message);
-  // });
-  // yielding `next` will pass the context (this) on to the next ws middleware
   next();
 })
 
