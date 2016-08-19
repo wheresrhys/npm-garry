@@ -34,8 +34,15 @@ function getDepObject (name, range) {
 		return Object.assign(obj, {
 			max: semverToNumber(normalizedRange),
 			min: semverToNumber(normalizedRange),
-			hardMax: true,
-			hardMin: true
+			closedMax: true,
+			closedMin: true
+		})
+	} else if (range === '*') {
+		return Object.assign(obj, {
+			max: 0,
+			min: semverToNumber('9999999.9.9'),
+			closedMax: true,
+			closedMin: true
 		})
 	} else {
 		const rx = /\d+\.\d+\.\d+/g;
@@ -45,23 +52,23 @@ function getDepObject (name, range) {
 			return Object.assign(obj, {
 				min: semverToNumber(firstSemver),
 				max: semverToNumber(secondSemver),
-				hardMax: normalizedRange.indexOf('<=') > -1,
-				hardMin: normalizedRange.indexOf('>=') > -1
+				closedMax: normalizedRange.indexOf('<=') > -1,
+				closedMin: normalizedRange.indexOf('>=') > -1
 			})
 		} else {
 			if (normalizedRange.indexOf('<') > -1) {
 				return Object.assign(obj, {
 					min: 0,
-					hardMin: true,
+					closedMin: true,
 					max: semverToNumber(firstSemver),
-					hardMax: normalizedRange.indexOf('<=') > -1
+					closedMax: normalizedRange.indexOf('<=') > -1
 				})
 			} else {
 				return Object.assign(obj, {
 					max: semverToNumber('9999999.9.9'),
-					hardMax: true,
+					closedMax: true,
 					min: semverToNumber(firstSemver),
-					hardMin: normalizedRange.indexOf('>=') > -1
+					closedMin: normalizedRange.indexOf('>=') > -1
 				})
 			}
 		}
@@ -70,22 +77,57 @@ function getDepObject (name, range) {
 
 }
 
-async function createTree(name, semverRange, npm) {
 
-	npm = npm || await fetch(`https://registry.npmjs.org/${name}/${semverRange || 'latest'}?json=true`).then(res => res.json());
-	let newData;
-	if (npm.dependencies) {
-		newData = Promise.all([createShallowTree(npm)]
-			.concat(Object.keys(npm.dependencies).map(name => createTree(name, [npm.dependencies[name]]))));
-	} else {
-		newData = Promise.resolve([createShallowTree(npm)]);
-	}
-	return Promise.race([
-		readTree(name, npm.version),
-		newData
-	])
+function mergeTree (tree, subtrees) {
+	subtrees.forEach(subtree => {
+		tree[subtree.name] = Object.assign(subtree, tree[subtree.name]);
+	})
+	return tree;
 }
 
+async function getTree(opts) {
+
+	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
+
+	// TODO if created ages ago then fire off a createShallow Tree in the background
+	let tree = await readShallowTree(opts.name, packageJson.version)
+		.catch( _ => createShallowTree(packageJson))
+
+	if (packageJson.dependencies) {
+		const subtrees = await Promise.all(
+			Object.keys(packageJson.dependencies)
+				.map(name => getTree({
+					name,
+					semverRange: packageJson.dependencies[name]
+				}))
+		);
+		tree = mergeTree(tree, subtrees);
+	}
+	return {
+		name: opts.name,
+		version: packageJson.version,
+		range: opts.semverRange,
+		dependencies: tree
+	}
+}
+
+function processRawData(res) {
+	const packages = {};
+	res
+		.map(r => {
+			return {
+				name: r.dep.properties.name,
+				version: r.depV.properties.semver,
+				range: r.dependency.properties.range
+			}
+		})
+		.forEach(item => {
+			if (!packages[item.name]) {
+				packages[item.name] = item;
+			}
+		})
+	return packages;
+}
 
 function createShallowTree(npm) {
 	// TODO write updated date
@@ -109,11 +151,7 @@ RETURN p as package, v as version, d as dependency
 			dependencies: Object.keys(npm.dependencies || {}).map(name => getDepObject(name, npm.dependencies[name]))
 		},
 	})
-}
-
-function readTree(name, version) {
-	return readShallowTree(name, version)
-// g s
+		.then(processRawData)
 }
 
 function readShallowTree(name, version) {
@@ -121,18 +159,17 @@ function readShallowTree(name, version) {
 	return db.cypher({
 		query: `\
 MATCH (p:Package {name: {name}})-[:hasVersion]->(v:Version {semver: {semver}})-[d:dependsOn]->(dep:Package)-[:hasVersion]->(depV:Version)
-WHERE depV.numericSemver <= d.max AND depV.numericSemver >= d.min
-RETURN p as package, v as version, d as dependency, dep, depV
-ORDER BY depV.numericSemver DESC
-	LIMIT 1
+WHERE ((d.closedMax AND depV.numericSemver <= d.max) OR depV.numericSemver < d.max) AND ((d.closedMin AND depV.numericSemver >= d.min) OR depV.numericSemver > d.min)
+RETURN d as dependency, dep, depV
+ORDER BY dep.name, depV.numericSemver DESC
 `,
 		params: {
 			name: name,
 			semver: version
 		},
 	})
+		.then(processRawData)
 }
-
 
 const apiRouter = koaRouter();
 
@@ -152,12 +189,11 @@ apiRouter.get('/package/:name', async (ctx, next) => {
 		throw 'not a valid package name'
 	}
 
-	if (!neo[0] || notLatest(neo, npm.version)) {
-		ctx.body = await createTree(ctx.params.name, npm.version, npm);
-	} else {
-		// TODO if date created not recent refresh in background
-		ctx.body = await readTree(ctx.params.name, npm.version);
-	}
+	ctx.body = await getTree({
+		name: ctx.params.name,
+		semverRange: npm.version,
+		packageJson: npm
+	});
 
 	//TODO
 	//Socket the hell out of it

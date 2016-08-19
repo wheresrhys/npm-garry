@@ -113,11 +113,11 @@ const Dependency = new Model({
 			type: Number, // convert e.g. 1.2.3 => 00000000100000000002000000003
 			required: true
 		},
-		hardMax: {
+		closedMax: {
 			type: Boolean,
 			required: true
 		},
-		hardMin: {
+		closedMin: {
 			type: Boolean,
 			required: true
 		}
