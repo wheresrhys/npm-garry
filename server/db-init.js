@@ -97,45 +97,10 @@ const Version = new Model({
 	]
 });
 
-const Dependency = new Model({
-	type: 'Dependency',
-
-	schema: {
-		range: {
-			type: String,
-			required: true
-		},
-		max: {
-			type: Number, // convert e.g. 1.2.3 => 00000000100000000002000000003
-			required: true
-		},
-		min: {
-			type: Number, // convert e.g. 1.2.3 => 00000000100000000002000000003
-			required: true
-		},
-		closedMax: {
-			type: Boolean,
-			required: true
-		},
-		closedMin: {
-			type: Boolean,
-			required: true
-		}
-	},
-	relationships: [
-		{
-			label: 'isForPackage',
-			model: 'Package',
-			many: true
-		}
-	]
-});
-
 const directly = require('directly');
 const models = {
 	Package,
-	Version,
-	Dependency
+	Version
 }
 
 let retryCount = 0;

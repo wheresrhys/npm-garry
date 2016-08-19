@@ -175,16 +175,8 @@ const apiRouter = koaRouter();
 
 apiRouter.get('/package/:name', async (ctx, next) => {
 
-	const [npm, neo] = await Promise.all([
-		fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json()),
-		db.cypher({
-			query: `MATCH (p:Package {name: {name}})-[hasVersion]->(v) RETURN v`,
-			params: {
-				name: ctx.params.name
-			},
-		})
-	])
-
+	const npm = await fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json());
+	console.log(npm)
 	if (npm.error) {
 		throw 'not a valid package name'
 	}
