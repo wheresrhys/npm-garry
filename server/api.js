@@ -51,11 +51,15 @@ function getDepObject (name, range) {
 		} else {
 			if (normalizedRange.indexOf('<') > -1) {
 				return Object.assign(obj, {
+					min: 0,
+					hardMin: true,
 					max: semverToNumber(firstSemver),
 					hardMax: normalizedRange.indexOf('<=') > -1
 				})
 			} else {
 				return Object.assign(obj, {
+					max: semverToNumber('9999999.9.9'),
+					hardMax: true,
 					min: semverToNumber(firstSemver),
 					hardMin: normalizedRange.indexOf('>=') > -1
 				})
@@ -109,16 +113,7 @@ RETURN p as package, v as version, d as dependency
 
 function readTree(name, version) {
 	return readShallowTree(name, version)
-// 	return db.cypher({
-// 		query: `\
-// MATCH path=(p:Package {name: {name}})-[h:hasVersion]->(Version {semver: {semver}})-[*0..]->(node)
-// RETURN node, length(path) AS depth
-// `,
-// 		params: {
-// 			name: name,
-// 			semver: version
-// 		},
-// 	}).then(json => JSON.stringify(json, null, 2))
+// g s
 }
 
 function readShallowTree(name, version) {
