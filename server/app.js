@@ -101,7 +101,7 @@ app.io.on('connection', ctx => {
 			socket.emit('error', 'not a valid package name');
 			socket.disconnect();
 		}
-
+		let updates = 0;
 		const [tree, complete] = await getTree({
 			name: packageName,
 			semverRange: npm.version,
@@ -109,6 +109,8 @@ app.io.on('connection', ctx => {
 			topLevel: true,
 			channel: {
 				update: () => {
+					// TODO implement a way to halt the process if there are circular deps
+					updates++;
 					socket.emit('tree', tree);
 				}
 			}
