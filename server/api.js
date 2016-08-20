@@ -81,8 +81,8 @@ function mergeTree (tree, subtrees) {
 	return tree;
 }
 
-async function getTree(opts) {
 
+async function getTree(opts) {
 	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
 
 	// TODO if created ages ago then fire off a createShallow Tree in the background
@@ -90,29 +90,37 @@ async function getTree(opts) {
 	// try redis
 	// then try graphdb, but reject if too old
 	// then try npm
+	const tree = {};
 
-	let tree = await readShallowTree(opts.name, packageJson.version)
+	const complete = readShallowTree(opts.name, packageJson.version)
 		.catch( _ => createShallowTree(packageJson))
+		.then(directDependencies => {
+			Object.assign(tree, directDependencies);
+			if (packageJson.dependencies) {
+				return Promise.all(Object.keys(packageJson.dependencies)
+					.map(name => getTree({
+							name,
+							semverRange: packageJson.dependencies[name],
+							channel: opts.channel
+						})
+						.then(([subtree, complete]) => {
+							directDependencies = mergeTree(tree, [subtree]);
+							opts.channel.update();
+							return complete;
+						})
+					));
+			}
+		})
 
-	if (packageJson.dependencies) {
-		const subtrees = await Promise.all(
-			Object.keys(packageJson.dependencies)
-				.map(name => getTree({
-					name,
-					semverRange: packageJson.dependencies[name],
-					socket: opts.socket
-				}))
-		);
-		tree = mergeTree(tree, subtrees);
-	}
+
 
 	// Also TODO - the result of every getTree call should be cached (REDIS?) and if readShallowTree succeeds just grab the whole thing from cache
-	return {
+	return [{
 		name: opts.name,
 		version: packageJson.version,
 		range: opts.semverRange,
 		dependencies: tree
-	}
+	}, complete]
 }
 
 function processRawData(res) {
@@ -187,7 +195,6 @@ ORDER BY dependencyPackage.name, dependencyVersion.numericSemver DESC
 }
 
 const apiRouter = koaRouter();
-
 apiRouter.get('/package/:name', async (ctx, next) => {
 
 	const npm = await fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json());
@@ -195,16 +202,31 @@ apiRouter.get('/package/:name', async (ctx, next) => {
 		throw 'not a valid package name'
 	}
 
-	ctx.body = await getTree({
+	const [tree, complete] = await getTree({
 		name: ctx.params.name,
 		semverRange: npm.version,
-		packageJson: npm
+		packageJson: npm,
+		topLevel: true,
+		channel: {
+			update: () => {
+				console.log('update', tree);
+			}
+		}
 	});
 
-	//TODO
-	//Socket the hell out of it
+	complete.then(() => {
+		console.log('end', JSON.stringify(tree, null, 2));
+		ctx.body = tree;
+		next();
+	})
 
-  next();
+
+
+
+	//TODO
+	//socket the hell out of it
+
+
 })
 
 
