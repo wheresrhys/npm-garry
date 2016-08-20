@@ -8,11 +8,11 @@ class Tree extends Component {
     constructor({tree, top}) {
         super();
         if (top) {
-	        socket.emit('package', packageName)
+	        socket.emit('package', JSON.stringify(packageDetails))
 					socket.on('tree', data => {
 					    this.setState({tree: data});
 					});
-					this.state.tree = {name: packageName, dependencies: {}}
+					this.state.tree = {name: packageDetails.name, dependencies: {}}
 				} else {
 					this.state.tree = tree;
 				}

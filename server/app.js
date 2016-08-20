@@ -54,7 +54,7 @@ const page = `<!DOCTYPE html>
 	</style>
 </head>
 <body>
-	<header><h1>npm garry<h1> <h2>- what moves does your dependency tree have up its sleeves?</h2></header>
+	<header><h1><a href="/">npm garry</a><h1></header>
 	<main>{body}</main>
 
 </body>`
@@ -62,7 +62,8 @@ const page = `<!DOCTYPE html>
 router.get('/', async (ctx, next) => {
 	ctx.body = page.replace(/{body}/, `\
 <form action="/package" method="get">
-	<input id="package" name="package"><label for="package">Enter a package name to analyse</label>
+	<input id="package" name="package"><label for="package">Enter a package name to analyse</label><br>
+	<input id="version" name="version"><label for="version">Optionally enter a semver range</label>
 	<button type="submit">Submit</button>
 </form>
 `)
@@ -74,7 +75,10 @@ router.get('/package', async (ctx, next) => {
 <h3>Results are coming in for ${ctx.query.package}</h3>
 <div id="tree"></div>
 <script src="/socket.io/socket.io.js"></script>
-<script>var packageName = '${ctx.query.package}';</script>
+<script>var packageDetails = {
+	name: '${ctx.query.package}',
+	version: '${ctx.query.version ? ctx.query.version : '' }'
+};</script>
 <script src="/main.js"></script>
 `)
 	next();
@@ -95,17 +99,20 @@ app.io.on('connection', ctx => {
   console.log('a user connected');
   const socket = ctx.socket;
 
-  socket.on('package', async packageName => {
-		const npm = await fetch(`https://registry.npmjs.org/${packageName}/latest?json=true`).then(res => res.json());
-		if (npm.error) {
+  socket.on('package', async packageDetails => {
+  	const details = JSON.parse(packageDetails);
+  	console.log(details)
+		const packageJson = await fetch(`https://registry.npmjs.org/${details.name}/${details.version || 'latest'}?json=true`).then(res => res.json());
+		if (packageJson.error) {
+			// TODO show this error to the user
 			socket.emit('error', 'not a valid package name');
 			socket.disconnect();
 		}
 		let updates = 0;
 		const [tree, complete] = await getTree({
-			name: packageName,
-			semverRange: npm.version,
-			packageJson: npm,
+			name: packageJson.name,
+			semverRange: packageJson.version,
+			packageJson: packageJson,
 			topLevel: true,
 			channel: {
 				update: () => {
