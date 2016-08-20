@@ -9,9 +9,6 @@ const db = getDb();
 // const api = websockify(koa());
 // const api = new Koa();
 //
-function notLatest(neoResult, semver) {
-	return true
-}
 
 function semverToNumber(semver) {
 	const numbers = semver.split('.').map(str => Number(str));
@@ -26,7 +23,6 @@ function semverToNumber(semver) {
 function getDepObject (name, range) {
 	const obj = {package: name, range};
 	const normalizedRange = semver.validRange(range);
-	console.log(normalizedRange);
 	if (/\|\|/.test(range)) {
 		throw 'Disjointed semver ranges not supported yet';
 	}
@@ -90,6 +86,11 @@ async function getTree(opts) {
 	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
 
 	// TODO if created ages ago then fire off a createShallow Tree in the background
+
+	// try redis
+	// then try graphdb, but reject if too old
+	// then try npm
+
 	let tree = await readShallowTree(opts.name, packageJson.version)
 		.catch( _ => createShallowTree(packageJson))
 
@@ -98,11 +99,14 @@ async function getTree(opts) {
 			Object.keys(packageJson.dependencies)
 				.map(name => getTree({
 					name,
-					semverRange: packageJson.dependencies[name]
+					semverRange: packageJson.dependencies[name],
+					socket: opts.socket
 				}))
 		);
 		tree = mergeTree(tree, subtrees);
 	}
+
+	// Also TODO - the result of every getTree call should be cached (REDIS?) and if readShallowTree succeeds just grab the whole thing from cache
 	return {
 		name: opts.name,
 		version: packageJson.version,
@@ -116,9 +120,9 @@ function processRawData(res) {
 	res
 		.map(r => {
 			return {
-				name: r.dep.properties.name,
-				version: r.depV.properties.semver,
-				range: r.dependency.properties.range
+				name: r.dependencyPackage.properties.name,
+				version: r.dependencyVersion && r.dependencyVersion.properties.semver,
+				range: r.dependencyRelationship.properties.range
 			}
 		})
 		.forEach(item => {
@@ -134,6 +138,7 @@ function createShallowTree(npm) {
 	return db.cypher({
 		query: `\
 MERGE (p:Package {name: {name}})
+SET p.updated = {updated}
 MERGE (v:Version {semver: {semver}, numericSemver: {numericSemver}, nameVersion: {nameVersion}})
 MERGE (p)-[h:hasVersion]->(v)
 WITH p, v, { dependencies } AS deps
@@ -141,10 +146,11 @@ UNWIND deps AS dep
 MERGE (p2:Package {name: dep.package })
 MERGE (v)-[d:dependsOn]->(p2)
 ON CREATE SET d += dep
-RETURN p as package, v as version, d as dependency
+RETURN p as package, v as version, d as dependencyRelationship, p2 as dependencyPackage
 `,
 		params: {
 			name: npm.name,
+			updated: new Date().toISOString(),
 			semver: npm.version,
 			nameVersion: `${npm.name}.${npm.version}`,
 			numericSemver: semverToNumber(npm.version),
@@ -158,16 +164,25 @@ function readShallowTree(name, version) {
 	// TODO write updated date
 	return db.cypher({
 		query: `\
-MATCH (p:Package {name: {name}})-[:hasVersion]->(v:Version {semver: {semver}})-[d:dependsOn]->(dep:Package)-[:hasVersion]->(depV:Version)
+MATCH (p:Package {name: {name}})-[:hasVersion]->(v:Version {semver: {semver}})-[d:dependsOn]->(p2:Package)-[:hasVersion]->(depV:Version)
 WHERE ((d.closedMax AND depV.numericSemver <= d.max) OR depV.numericSemver < d.max) AND ((d.closedMin AND depV.numericSemver >= d.min) OR depV.numericSemver > d.min)
-RETURN d as dependency, dep, depV
-ORDER BY dep.name, depV.numericSemver DESC
+RETURN p as package, v as version, d as dependencyRelationship, p2 as dependencyPackage, depV AS dependencyVersion
+ORDER BY dependencyPackage.name, dependencyVersion.numericSemver DESC
 `,
 		params: {
 			name: name,
 			semver: version
 		},
 	})
+		.then(records => {
+			if (!records.length) {
+				throw 'no results';
+			}
+			if (!records[0].package.updated || (new Date() - new Date(records[0].package.updated)) > (1000 * 60 * 60 * 24)) {
+				throw 'record too old';
+			}
+			return records;
+		})
 		.then(processRawData)
 }
 
@@ -176,7 +191,6 @@ const apiRouter = koaRouter();
 apiRouter.get('/package/:name', async (ctx, next) => {
 
 	const npm = await fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json());
-	console.log(npm)
 	if (npm.error) {
 		throw 'not a valid package name'
 	}
