@@ -22,7 +22,9 @@ class Tree extends Component {
     render() {
     	const tree = this.props.tree || this.state.tree;
         return <div class={"tree" + (tree.complete ? " complete" : " incomplete")} >
-  <p>{ tree.name }, { tree.version }, { tree.range } </p>
+  <p><a href={"/package?package=" + tree.name}>{ tree.name }</a>,
+  <a href={"/package?package="  + tree.name + "&version=" + tree.version }>{ tree.version }</a>,
+  <a href={"/package?package="  + tree.name + "&version=" + tree.range }>{ tree.range }</a></p>
 
   <ul>
   { Object.keys(tree.dependencies).map(dep => (

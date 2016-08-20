@@ -73,12 +73,23 @@
 	            (0, _preact.h)(
 	                'p',
 	                null,
-	                tree.name,
-	                ', ',
-	                tree.version,
-	                ', ',
-	                tree.range,
-	                ' '
+	                (0, _preact.h)(
+	                    'a',
+	                    { href: "/package?package=" + tree.name },
+	                    tree.name
+	                ),
+	                ',',
+	                (0, _preact.h)(
+	                    'a',
+	                    { href: "/package?package=" + tree.name + "&version=" + tree.version },
+	                    tree.version
+	                ),
+	                ',',
+	                (0, _preact.h)(
+	                    'a',
+	                    { href: "/package?package=" + tree.name + "&version=" + tree.range },
+	                    tree.range
+	                )
 	            ),
 	            (0, _preact.h)(
 	                'ul',

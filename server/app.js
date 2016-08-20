@@ -49,8 +49,8 @@ const page = `<!DOCTYPE html>
 <head>
 	<title>NPM GARRY</title>
 	<style>
-	.incomplete {color: red}
-	.complete {color: green}
+	.incomplete p {background: rgba(255, 0, 0, 0.2)}
+	.complete p {background: rgba(0, 255, 0, 0.2)}
 	</style>
 </head>
 <body>
@@ -101,7 +101,6 @@ app.io.on('connection', ctx => {
 
   socket.on('package', async packageDetails => {
   	const details = JSON.parse(packageDetails);
-  	console.log(`https://registry.npmjs.org/${details.name.replace('/', '%2F')}/${details.version || 'latest'}?json=true`)
 
 		const packageJson = await fetch(`https://registry.npmjs.org/${details.name.replace('/', '%2F')}/${details.version || 'latest'}?json=true`).then(res => res.json());
 		if (packageJson.error) {
