@@ -6,7 +6,7 @@ run:
 	source ./.env; nodemon -e js,html server -w server
 
 build:
-	@node_modules/.bin/riot --type babel client public/tags.js
+	webpack
 
 
 watch:

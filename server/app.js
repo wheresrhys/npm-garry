@@ -49,6 +49,10 @@ const router = koaRouter();
 const page = `<!DOCTYPE html>
 <head>
 	<title>NPM GARRY</title>
+	<style>
+	.incomplete {color: red}
+	.complete {color: green}
+	</style>
 </head>
 <body>
 	<header><h1>npm garry<h1> <h2>- what moves does your dependency tree have up its sleeves?</h2></header>
@@ -69,16 +73,10 @@ router.get('/', async (ctx, next) => {
 router.get('/package', async (ctx, next) => {
 	ctx.body = page.replace(/{body}/, `\
 <h3>Results are coming in for ${ctx.query.package}</h3>
-<tree></tree>
+<div id="tree"></div>
 <script src="/socket.io/socket.io.js"></script>
-<script>
-var nsp = '/api/package/${ctx.query.package}'
-    var socket = io('http://localhost:3001');
-    socket.emit('package', '${ctx.query.package}')
-    socket.on('tree', function (data) {
-        console.log(data);
-    });
-</script>
+<script>var packageName = '${ctx.query.package}';</script>
+<script src="/main.js"></script>
 
 `)
 
@@ -93,13 +91,6 @@ var nsp = '/api/package/${ctx.query.package}'
 
 const getTree = require('./get-tree')
 
-
-const apiResponse = async (ctx, next) => {
-
-};
-
-// router.use('/api/package/:name', apiResponse);
-
 app
 	.use(router.routes())
 	.use(router.allowedMethods())
@@ -108,9 +99,6 @@ const IO = require( 'koa-socket' )
 const io = new IO()
 
 io.attach( app )
-
-io
-	.use(apiResponse)
 
 app.io.on('connection', ctx => {
   console.log('a user connected');
@@ -137,7 +125,6 @@ app.io.on('connection', ctx => {
 		socket.emit('tree', tree);
 
 		await complete
-
 		socket.emit('tree', tree);
 		socket.disconnect();
 

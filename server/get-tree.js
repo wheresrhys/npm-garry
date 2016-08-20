@@ -71,7 +71,7 @@ function getDepObject (name, range) {
 
 function mergeTree (tree, subtrees) {
 	subtrees.forEach(subtree => {
-		tree[subtree.name] = Object.assign(subtree, tree[subtree.name]);
+		tree[subtree.name] = Object.assign(tree[subtree.name], subtree);
 	})
 	return tree;
 }
@@ -87,6 +87,14 @@ async function getTree(opts) {
 	// then try npm
 	const tree = {};
 
+	const result = {
+		name: opts.name,
+		version: packageJson.version,
+		range: opts.semverRange,
+		dependencies: tree,
+		complete: false
+	}
+
 	const complete = readShallowTree(opts.name, packageJson.version)
 		.catch( _ => createShallowTree(packageJson))
 		.then(directDependencies => {
@@ -99,23 +107,24 @@ async function getTree(opts) {
 							channel: opts.channel
 						})
 						.then(([subtree, complete]) => {
-							directDependencies = mergeTree(tree, [subtree]);
+							mergeTree(tree, [subtree]);
 							opts.channel.update();
+							complete.then(() => {
+								tree[subtree.name].complete = true;
+							})
 							return complete;
 						})
-					));
+					))
 			}
-		})
+		}).then(() => {
+			result.complete = true;
+			opts.channel.update();
+		});
 
 
 
 	// Also TODO - the result of every getTree call should be cached (REDIS?) and if readShallowTree succeeds just grab the whole thing from cache
-	return [{
-		name: opts.name,
-		version: packageJson.version,
-		range: opts.semverRange,
-		dependencies: tree
-	}, complete]
+	return [result, complete]
 }
 
 function processRawData(res) {
