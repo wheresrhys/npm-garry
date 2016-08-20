@@ -7,8 +7,8 @@ global.logErr = (err) => {
 };
 
 import 'isomorphic-fetch';
-import {init as dbInit} from './db-init';
-dbInit();
+import {init as initNeo} from './neo4j-init';
+
 // create a koa app and initialise the database
 import Koa from 'koa';
 const app = new Koa();
@@ -25,7 +25,6 @@ app.use(async (ctx, next) => {
 
 // static assets
 import serve from 'koa-static';
-import mount from 'koa-mount';
 app.use(serve('public'));
 
 
@@ -77,15 +76,7 @@ router.get('/package', async (ctx, next) => {
 <script src="/socket.io/socket.io.js"></script>
 <script>var packageName = '${ctx.query.package}';</script>
 <script src="/main.js"></script>
-
 `)
-
-	// <script src="https://cdn.jsdelivr.net/riot/2.5/riot.min.js"></script>
-// <script src="/tags.js"></script>
-// <script>riot.mount('tree', {
-// 	package: '${ctx.query.package}',
-// 	dependencies: []
-// })</script>
 	next();
 });
 
@@ -131,17 +122,14 @@ app.io.on('connection', ctx => {
 		//TODO
 		//send tiny updates rather than the entire object every time
 
-
   });
 });
+initNeo()
+	.then(() => {
+		app.listen(process.env.PORT || 3001, function () {
+			console.log(`listening on ${process.env.PORT || 3001}`);
+		})
+	})
 
-// app.io.on( 'join', ( ctx, data ) => {
-//   console.log( 'join event fired', data )
-// })
-
-
-app.listen(process.env.PORT || 3001, function () {
-	console.log(`listening on ${process.env.PORT || 3001}`);
-})
 
 

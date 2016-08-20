@@ -1,8 +1,12 @@
-import {init, getDb} from './db-init';
+import {init as initNeo, getDb as getNeo} from './neo4j-init';
 import semver from 'semver';
+import { createClient } from 'then-redis'
 
-init();
-const db = getDb();
+
+const redis = createClient(process.env.HEROKU_REDIS_ONYX_URL)
+
+initNeo();
+const neo4j = getNeo();
 
 
 function semverToNumber(semver) {
@@ -77,55 +81,6 @@ function mergeTree (tree, subtrees) {
 }
 
 
-async function getTree(opts) {
-	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
-
-	// TODO if created ages ago then fire off a createShallow Tree in the background
-
-	// try redis
-	// then try graphdb, but reject if too old
-	// then try npm
-	const tree = {};
-
-	const result = {
-		name: opts.name,
-		version: packageJson.version,
-		range: opts.semverRange,
-		dependencies: tree,
-		complete: false
-	}
-
-	const complete = readShallowTree(opts.name, packageJson.version)
-		.catch( _ => createShallowTree(packageJson))
-		.then(directDependencies => {
-			Object.assign(tree, directDependencies);
-			if (packageJson.dependencies) {
-				return Promise.all(Object.keys(packageJson.dependencies)
-					.map(name => getTree({
-							name,
-							semverRange: packageJson.dependencies[name],
-							channel: opts.channel
-						})
-						.then(([subtree, complete]) => {
-							mergeTree(tree, [subtree]);
-							opts.channel.update();
-							complete.then(() => {
-								tree[subtree.name].complete = true;
-							})
-							return complete;
-						})
-					))
-			}
-		}).then(() => {
-			result.complete = true;
-			opts.channel.update();
-		});
-
-
-
-	// Also TODO - the result of every getTree call should be cached (REDIS?) and if readShallowTree succeeds just grab the whole thing from cache
-	return [result, complete]
-}
 
 function processRawData(res) {
 	const packages = {};
@@ -146,8 +101,8 @@ function processRawData(res) {
 }
 
 function createShallowTree(npm) {
-	// TODO write updated date
-	return db.cypher({
+
+	neo4j.cypher({
 		query: `\
 MERGE (p:Package {name: {name}})
 SET p.updated = {updated}
@@ -170,11 +125,21 @@ RETURN p as package, v as version, d as dependencyRelationship, p2 as dependency
 		},
 	})
 		.then(processRawData)
+
+	// for now don't wait for neo4j, and just return something obtained from package json
+	return npm.dependencies ? Promise.resolve(Object.keys(npm.dependencies).reduce((obj, key) => {
+		obj[key] = {
+			name: key,
+			range: npm.dependencies[key],
+			dependencies: {}
+		}
+		return obj;
+	}, {})) : Promise.resolve({});
 }
 
 function readShallowTree(name, version) {
 	// TODO write updated date
-	return db.cypher({
+	return neo4j.cypher({
 		query: `\
 MATCH (p:Package {name: {name}})-[:hasVersion]->(v:Version {semver: {semver}})-[d:dependsOn]->(p2:Package)-[:hasVersion]->(depV:Version)
 WHERE ((d.closedMax AND depV.numericSemver <= d.max) OR depV.numericSemver < d.max) AND ((d.closedMin AND depV.numericSemver >= d.min) OR depV.numericSemver > d.min)
@@ -196,6 +161,76 @@ ORDER BY dependencyPackage.name, dependencyVersion.numericSemver DESC
 			return records;
 		})
 		.then(processRawData)
+}
+
+
+async function getTree(opts) {
+	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
+
+	// TODO if created ages ago then fire off a createShallow Tree in the background
+
+	// try redis
+	// then try graphdb, but reject if too old
+	// then try npm
+	const tree = {};
+
+	const result = {
+		name: opts.name,
+		version: packageJson.version,
+		range: opts.semverRange,
+		dependencies: tree,
+		complete: false
+	}
+
+	const redisKey = `${opts.name}:${packageJson.version}`;
+	// For now don't read from neo4j - it's slow and not useful for this task
+	// const complete = readShallowTree(opts.name, packageJson.version)
+	// 	.catch( _ => createShallowTree(packageJson))
+	const complete = redis.get(redisKey)
+		.then(redisResult => {
+			if (!redisResult) {
+				throw 'not in redis';
+			}
+			Object.assign(result, JSON.parse(redisResult))
+			opts.channel.update()
+		})
+		.catch(() => {
+			return createShallowTree(packageJson)
+				.then(directDependencies => {
+					Object.assign(tree, directDependencies);
+					if (packageJson.dependencies) {
+						return Promise.all(Object.keys(packageJson.dependencies)
+							.map(name => getTree({
+									name,
+									semverRange: packageJson.dependencies[name],
+									channel: opts.channel
+								})
+								.then(([subtree, complete]) => {
+									mergeTree(tree, [subtree]);
+									opts.channel.update();
+									complete.then(() => {
+										tree[subtree.name].complete = true;
+									})
+									return complete;
+								})
+							))
+					}
+				}).then(() => {
+					result.complete = true;
+					opts.channel.update();
+					// There's a max string length of 512MB, so won't always work, but as we build responses recursively, no harnm ins always trying
+					redis
+						.set(redisKey, JSON.stringify(result))
+						.then(() => redis.expireat(redisKey, parseInt((+new Date)/1000) + 86400))
+				});
+		})
+
+
+
+
+	// Also TODO - the result of every getTree call should be cached (REDIS?) and if readShallowTree succeeds just grab the whole thing from cache
+
+	return [result, complete]
 }
 
 module.exports = getTree;
