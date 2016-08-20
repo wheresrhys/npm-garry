@@ -101,8 +101,9 @@ app.io.on('connection', ctx => {
 
   socket.on('package', async packageDetails => {
   	const details = JSON.parse(packageDetails);
-  	console.log(details)
-		const packageJson = await fetch(`https://registry.npmjs.org/${details.name}/${details.version || 'latest'}?json=true`).then(res => res.json());
+  	console.log(`https://registry.npmjs.org/${details.name.replace('/', '%2F')}/${details.version || 'latest'}?json=true`)
+
+		const packageJson = await fetch(`https://registry.npmjs.org/${details.name.replace('/', '%2F')}/${details.version || 'latest'}?json=true`).then(res => res.json());
 		if (packageJson.error) {
 			// TODO show this error to the user
 			socket.emit('error', 'not a valid package name');
@@ -121,7 +122,7 @@ app.io.on('connection', ctx => {
 					socket.emit('tree', tree);
 				}
 			}
-		});
+		}).catch(e => console.log());
 		socket.emit('tree', tree);
 
 		await complete

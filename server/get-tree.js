@@ -14,6 +14,8 @@ function semverToNumber(semver) {
 	// bit hacky, but should work except for very rare cases where semver is e.g. 23456.2.34
 	const numericEquivalent = Math.pow(10, 10) * numbers[0] + Math.pow(10, 5) * numbers[1] + numbers[2];
 	if (isNaN(numericEquivalent)) {
+		// not throwing fro now as only used in neo4j
+		return -1;
 		throw 'Only x.y.z semvers supported - no supprt for prerelease semvers yet';
 	}
 	return numericEquivalent;
@@ -23,7 +25,7 @@ function getDepObject (name, range) {
 	const obj = {package: name, range};
 	const normalizedRange = semver.validRange(range);
 	if (/\|\|/.test(range)) {
-		throw 'Disjointed semver ranges not supported yet';
+		return null
 	}
 	if (semver.valid(range)) {
 		return Object.assign(obj, {
@@ -120,8 +122,10 @@ RETURN p as package, v as version, d as dependencyRelationship, p2 as dependency
 			updated: new Date().toISOString(),
 			semver: npm.version,
 			nameVersion: `${npm.name}.${npm.version}`,
-			numericSemver: semverToNumber(npm.version),
+			numericSemver: semverToNumber(npm.version) || -1,
 			dependencies: Object.keys(npm.dependencies || {}).map(name => getDepObject(name, npm.dependencies[name]))
+				// as neo4j not used for now, ignoring and not throwing on weird semvers like `1 || 2`
+				.filter(obj => !!obj)
 		},
 	})
 		.then(processRawData)
@@ -165,7 +169,7 @@ ORDER BY dependencyPackage.name, dependencyVersion.numericSemver DESC
 
 
 async function getTree(opts) {
-	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
+	const packageJson = opts.packageJson || await fetch(`https://registry.npmjs.org/${opts.name.replace('/', '%2F')}/${opts.semverRange || 'latest'}?json=true`).then(res => res.json());
 
 	// TODO if created ages ago then fire off a createShallow Tree in the background
 
