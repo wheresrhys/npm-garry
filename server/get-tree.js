@@ -104,31 +104,31 @@ function processRawData(res) {
 
 function createShallowTree(npm) {
 
-	neo4j.cypher({
-		query: `\
-MERGE (p:Package {name: {name}})
-SET p.updated = {updated}
-MERGE (v:Version {semver: {semver}, numericSemver: {numericSemver}, nameVersion: {nameVersion}})
-MERGE (p)-[h:hasVersion]->(v)
-WITH p, v, { dependencies } AS deps
-UNWIND deps AS dep
-MERGE (p2:Package {name: dep.package })
-MERGE (v)-[d:dependsOn]->(p2)
-ON CREATE SET d += dep
-RETURN p as package, v as version, d as dependencyRelationship, p2 as dependencyPackage
-`,
-		params: {
-			name: npm.name,
-			updated: new Date().toISOString(),
-			semver: npm.version,
-			nameVersion: `${npm.name}.${npm.version}`,
-			numericSemver: semverToNumber(npm.version) || -1,
-			dependencies: Object.keys(npm.dependencies || {}).map(name => getDepObject(name, npm.dependencies[name]))
-				// as neo4j not used for now, ignoring and not throwing on weird semvers like `1 || 2`
-				.filter(obj => !!obj)
-		},
-	})
-		.then(processRawData)
+// 	neo4j.cypher({
+// 		query: `\
+// MERGE (p:Package {name: {name}})
+// SET p.updated = {updated}
+// MERGE (v:Version {semver: {semver}, numericSemver: {numericSemver}, nameVersion: {nameVersion}})
+// MERGE (p)-[h:hasVersion]->(v)
+// WITH p, v, { dependencies } AS deps
+// UNWIND deps AS dep
+// MERGE (p2:Package {name: dep.package })
+// MERGE (v)-[d:dependsOn]->(p2)
+// ON CREATE SET d += dep
+// RETURN p as package, v as version, d as dependencyRelationship, p2 as dependencyPackage
+// `,
+// 		params: {
+// 			name: npm.name,
+// 			updated: new Date().toISOString(),
+// 			semver: npm.version,
+// 			nameVersion: `${npm.name}.${npm.version}`,
+// 			numericSemver: semverToNumber(npm.version) || -1,
+// 			dependencies: Object.keys(npm.dependencies || {}).map(name => getDepObject(name, npm.dependencies[name]))
+// 				// as neo4j not used for now, ignoring and not throwing on weird semvers like `1 || 2`
+// 				.filter(obj => !!obj)
+// 		},
+// 	})
+// 		.then(processRawData)
 
 	// for now don't wait for neo4j, and just return something obtained from package json
 	return npm.dependencies ? Promise.resolve(Object.keys(npm.dependencies).reduce((obj, key) => {
