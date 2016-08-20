@@ -1,14 +1,9 @@
-import koaRouter from 'koa-router';
 import {init, getDb} from './db-init';
 import semver from 'semver';
 
 init();
 const db = getDb();
-// const websockify = require('koa-websocket');
 
-// const api = websockify(koa());
-// const api = new Koa();
-//
 
 function semverToNumber(semver) {
 	const numbers = semver.split('.').map(str => Number(str));
@@ -194,40 +189,4 @@ ORDER BY dependencyPackage.name, dependencyVersion.numericSemver DESC
 		.then(processRawData)
 }
 
-const apiRouter = koaRouter();
-apiRouter.get('/package/:name', async (ctx, next) => {
-
-	const npm = await fetch(`https://registry.npmjs.org/${ctx.params.name}/latest?json=true`).then(res => res.json());
-	if (npm.error) {
-		throw 'not a valid package name'
-	}
-
-	const [tree, complete] = await getTree({
-		name: ctx.params.name,
-		semverRange: npm.version,
-		packageJson: npm,
-		topLevel: true,
-		channel: {
-			update: () => {
-				console.log('update', tree);
-			}
-		}
-	});
-
-	complete.then(() => {
-		console.log('end', JSON.stringify(tree, null, 2));
-		ctx.body = tree;
-		next();
-	})
-
-
-
-
-	//TODO
-	//socket the hell out of it
-
-
-})
-
-
-module.exports = apiRouter;
+module.exports = getTree;

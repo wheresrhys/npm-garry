@@ -1,3 +1,4 @@
+
 // Set up some useful global utilities
 global.log = console.log.bind(console);
 global.logErr = (err) => {
@@ -69,26 +70,91 @@ router.get('/package', async (ctx, next) => {
 	ctx.body = page.replace(/{body}/, `\
 <h3>Results are coming in for ${ctx.query.package}</h3>
 <tree></tree>
-<script src="https://cdn.jsdelivr.net/riot/2.5/riot.min.js"></script>
-<script src="/tags.js"></script>
-<script>riot.mount('tree', {
-	package: '${ctx.query.package}',
-	dependencies: []
-})</script>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+var nsp = '/api/package/${ctx.query.package}'
+    var socket = io('http://localhost:3001');
+    socket.emit('package', '${ctx.query.package}')
+    socket.on('tree', function (data) {
+        console.log(data);
+    });
+</script>
+
 `)
+
+	// <script src="https://cdn.jsdelivr.net/riot/2.5/riot.min.js"></script>
+// <script src="/tags.js"></script>
+// <script>riot.mount('tree', {
+// 	package: '${ctx.query.package}',
+// 	dependencies: []
+// })</script>
 	next();
 });
 
-const apiRouter = require('./api')
-
-router.use('/api', apiRouter.routes(), apiRouter.allowedMethods());
+const getTree = require('./get-tree')
 
 
+const apiResponse = async (ctx, next) => {
+
+};
+
+// router.use('/api/package/:name', apiResponse);
 
 app
 	.use(router.routes())
 	.use(router.allowedMethods())
 
+const IO = require( 'koa-socket' )
+const io = new IO()
+
+io.attach( app )
+
+io
+	.use(apiResponse)
+
+app.io.on('connection', ctx => {
+  console.log('a user connected');
+  const socket = ctx.socket;
+
+  socket.on('package', async packageName => {
+		const npm = await fetch(`https://registry.npmjs.org/${packageName}/latest?json=true`).then(res => res.json());
+		if (npm.error) {
+			socket.emit('error', 'not a valid package name');
+			socket.disconnect();
+		}
+
+		const [tree, complete] = await getTree({
+			name: packageName,
+			semverRange: npm.version,
+			packageJson: npm,
+			topLevel: true,
+			channel: {
+				update: () => {
+					socket.emit('tree', tree);
+				}
+			}
+		});
+		socket.emit('tree', tree);
+
+		await complete
+
+		socket.emit('tree', tree);
+		socket.disconnect();
+
+		//TODO
+		//send tiny updates rather than the entire object every time
+
+
+  });
+});
+
+// app.io.on( 'join', ( ctx, data ) => {
+//   console.log( 'join event fired', data )
+// })
+
+
 app.listen(process.env.PORT || 3001, function () {
 	console.log(`listening on ${process.env.PORT || 3001}`);
 })
+
+
